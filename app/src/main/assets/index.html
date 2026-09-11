@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Arcanum</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark">◆</span><div><b>ARCANUM</b><small>Indian market intelligence</small></div></div>
+  <button id="refresh" class="icon">⟳</button>
+</header>
+
+<section class="ticker">
+  <div class="ticker-title">MARKET</div>
+  <div id="market" class="market-row"></div>
+</section>
+
+<div class="searchrow">
+  <input id="search" placeholder="Search symbol, company or headline…">
+  <button id="clear">×</button>
+</div>
+
+<nav id="tabs">
+  <button data-tab="results" class="active">RESULTS <i id="n-results">0</i></button>
+  <button data-tab="actions">ACTIONS <i id="n-actions">0</i></button>
+  <button data-tab="filings">FILINGS <i id="n-filings">0</i></button>
+  <button data-tab="news">NEWS <i id="n-news">0</i></button>
+  <button data-tab="watchlist">WATCHLIST <i id="n-watch">0</i></button>
+</nav>
+
+<main>
+  <div id="status">Loading live web data…</div>
+  <section id="watchPanel" hidden>
+    <div class="add"><input id="watchInput" placeholder="Add NSE symbol e.g. RELIANCE"><button id="addWatch">ADD</button></div>
+    <div id="watchRows"></div>
+  </section>
+  <section id="list"></section>
+  <div id="empty" hidden>No matching items.</div>
+</main>
+
+<footer><span id="updated">Not updated</span><span>NSE + Google News + Yahoo Finance</span></footer>
+
+<script src="app.js"></script>
+</body>
+</html>

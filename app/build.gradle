@@ -1,0 +1,17 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.arcanum'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.arcanum'
+        minSdk 26
+        targetSdk 35
+        versionCode 2
+        versionName '1.2.0'
+    }
+}
+

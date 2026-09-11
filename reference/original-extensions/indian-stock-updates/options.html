@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Bazaar Board — Settings</title>
+<link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <span class="mark">◆</span>
+      <h1>Bazaar Board settings</h1>
+    </header>
+
+    <section class="panel">
+      <h2>Watchlist</h2>
+      <p class="hint">Track specific NSE symbols. Starred items appear first in the ticker and trigger a desktop notification when a new result or corporate action is filed.</p>
+      <form id="addForm" class="addrow">
+        <input id="addInput" type="text" placeholder="e.g. RELIANCE, TCS, INFY" autocomplete="off" />
+        <button type="submit">Add</button>
+      </form>
+      <ul id="watchList" class="taglist"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>Notifications</h2>
+      <label class="toggle">
+        <input type="checkbox" id="notifyToggle" />
+        <span>Notify me when a watchlisted company files a result or action</span>
+      </label>
+    </section>
+
+    <section class="panel">
+      <h2>About</h2>
+      <p class="hint">Data is read from NSE India's public corporate-filings feed and refreshes automatically every 15 minutes. If the exchange throttles requests, use the refresh button in the popup to retry.</p>
+    </section>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

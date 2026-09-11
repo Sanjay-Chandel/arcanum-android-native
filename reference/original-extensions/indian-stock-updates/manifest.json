@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "Bazaar Board — Indian Stock Results & Actions",
+  "short_name": "Bazaar Board",
+  "version": "1.0.0",
+  "description": "Live board of NSE/BSE company results, corporate actions (dividends, splits, buybacks, bonuses) and filings for the Indian stock market.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Bazaar Board — Indian stock updates"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "https://www.nseindia.com/*",
+    "https://nsearchives.nseindia.com/*",
+    "https://www.bseindia.com/*",
+    "https://api.bseindia.com/*",
+    "https://www.moneycontrol.com/*",
+    "https://www.livemint.com/*",
+    "https://news.google.com/*",
+    "https://query1.finance.yahoo.com/*",
+    "https://query2.finance.yahoo.com/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "nse_headers",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
+}

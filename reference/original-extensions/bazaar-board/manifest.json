@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Bazaar Board — India Analyst Call Tracker",
+  "version": "1.0.0",
+  "description": "Tracks real, published news mentions of major brokerage/analyst stock calls on Indian equities, pulled live from public financial news feeds.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "options.html",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://www.moneycontrol.com/*",
+    "http://www.moneycontrol.com/*",
+    "https://www.business-standard.com/*",
+    "http://www.business-standard.com/*",
+    "https://feeds.hindustantimes.com/*",
+    "https://www.livemint.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

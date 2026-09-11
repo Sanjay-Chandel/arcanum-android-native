@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Bazaar Board — Settings</title>
+<link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>Bazaar Board — Sources &amp; Firms</h1>
+    <p class="note">
+      This extension only reads <strong>public RSS news feeds</strong> and tags headlines that
+      mention a tracked firm name. It does not — and cannot — pull data from brokerages' private
+      research portals, since that content isn't publicly accessible. Add or remove feeds and firm
+      names below.
+    </p>
+
+    <section>
+      <h2>News feeds</h2>
+      <div id="feedList" class="item-list"></div>
+      <div class="add-row">
+        <input id="feedName" placeholder="Source name (e.g. Livemint)" />
+        <input id="feedUrl" placeholder="RSS feed URL (https://...)" />
+        <button id="addFeed">Add feed</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Tracked firm names</h2>
+      <div id="firmList" class="item-list"></div>
+      <div class="add-row">
+        <input id="firmName" placeholder="Firm name (e.g. UBS)" />
+        <button id="addFirm">Add firm</button>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button id="saveBtn" class="primary">Save</button>
+      <button id="resetBtn">Reset to defaults</button>
+      <span id="saveStatus"></span>
+    </div>
+  </div>
+  <script src="shared.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

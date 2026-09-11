@@ -1,0 +1,34 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "Referer", "operation": "set", "value": "https://www.nseindia.com/" },
+        { "header": "Accept", "operation": "set", "value": "application/json, text/plain, */*" },
+        { "header": "Accept-Language", "operation": "set", "value": "en-US,en;q=0.9" },
+        { "header": "X-Requested-With", "operation": "set", "value": "XMLHttpRequest" }
+      ]
+    },
+    "condition": {
+      "urlFilter": "||nseindia.com/api/",
+      "resourceTypes": ["xmlhttprequest"]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "Referer", "operation": "set", "value": "https://www.bseindia.com/" },
+        { "header": "Accept", "operation": "set", "value": "application/json, text/plain, */*" }
+      ]
+    },
+    "condition": {
+      "urlFilter": "||bseindia.com/",
+      "resourceTypes": ["xmlhttprequest"]
+    }
+  }
+]

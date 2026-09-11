@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Bazaar Board</title>
+<link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="board">
+
+    <div class="ticker">
+      <span class="ticker__exchange ticker__exchange--nse">NSE</span>
+      <div class="ticker__viewport">
+        <div class="ticker__track" id="tickerTrackNse">
+          <span class="ticker__item ticker__item--loading">Loading live prices…</span>
+        </div>
+      </div>
+    </div>
+    <div class="ticker">
+      <span class="ticker__exchange ticker__exchange--bse">BSE</span>
+      <div class="ticker__viewport">
+        <div class="ticker__track" id="tickerTrackBse">
+          <span class="ticker__item ticker__item--loading">Loading live prices…</span>
+        </div>
+      </div>
+    </div>
+
+    <header class="head">
+      <div class="head__brand">
+        <span class="head__mark">◆</span>
+        <div class="head__titles">
+          <h1>Bazaar Board</h1>
+          <p id="statusLine">Connecting to exchange…</p>
+        </div>
+      </div>
+      <div class="head__actions">
+        <button id="refreshBtn" class="iconbtn" title="Refresh">⟳</button>
+        <button id="settingsBtn" class="iconbtn" title="Watchlist &amp; settings">⚙</button>
+      </div>
+    </header>
+
+    <div class="filterbar">
+      <input id="searchInput" type="text" placeholder="Search symbol or company…" autocomplete="off" />
+      <button id="watchOnlyBtn" class="chip" data-active="false">★ Only</button>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab" data-tab="results" data-active="true">
+        <span class="tab__label">Results</span><span class="tab__count" id="countResults">0</span>
+      </button>
+      <button class="tab" data-tab="actions">
+        <span class="tab__label">Actions</span><span class="tab__count" id="countActions">0</span>
+      </button>
+      <button class="tab" data-tab="filings">
+        <span class="tab__label">Filings</span><span class="tab__count" id="countFilings">0</span>
+      </button>
+      <button class="tab" data-tab="news">
+        <span class="tab__label">News</span><span class="tab__count" id="countNews">0</span>
+      </button>
+      <button class="tab" data-tab="watchlist">
+        <span class="tab__label">Watch</span><span class="tab__count" id="countWatch">0</span>
+      </button>
+    </nav>
+
+    <main class="list" id="list">
+      <div class="empty" id="emptyState">
+        <p>No data yet.</p>
+      </div>
+    </main>
+
+    <section class="watchlist-panel" id="watchlistPanel" style="display:none">
+      <p class="wl-hint">Add any NSE symbol (e.g. <code>RELIANCE</code>, <code>TCS</code>, <code>INFY</code>). Prices are live from NSE's quote feed, refreshed automatically.</p>
+      <div class="wl-add-row">
+        <input id="wlAddInput" type="text" placeholder="e.g. WIPRO" autocomplete="off" />
+        <button id="wlAddBtn">Add</button>
+      </div>
+      <ul id="wlList" class="wl-list"></ul>
+    </section>
+
+    <footer class="foot">
+      <span id="lastUpdated">—</span>
+      <a href="https://www.nseindia.com/companies-listing/corporate-filings-financial-results" target="_blank" rel="noopener">Source: NSE ↗</a>
+    </footer>
+  </div>
+
+  <template id="cardTemplate">
+    <article class="card">
+      <div class="card__top">
+        <span class="card__symbol"></span>
+        <span class="card__price" aria-hidden="true"></span>
+        <button class="card__star" title="Add to watchlist">☆</button>
+      </div>
+      <p class="card__company"></p>
+      <p class="card__headline"></p>
+      <div class="card__meta">
+        <span class="card__badge"></span>
+        <span class="card__detail"></span>
+        <span class="card__date"></span>
+        <span class="card__open">↗</span>
+      </div>
+    </article>
+  </template>
+
+  <script src="popup.js"></script>
+</body>
+</html>
