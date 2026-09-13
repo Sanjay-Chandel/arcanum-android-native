@@ -3,7 +3,28 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const cb={}; let seq=0;
 window.nativeResult=(id,payload,ok)=>{const x=cb[id];if(!x)return;delete cb[id];ok?x.resolve(payload):x.reject(new Error(payload))};
-function nativeFetch(url){return new Promise((resolve,reject)=>{const id="r"+(++seq);cb[id]={resolve,reject};Android.fetch(url,id);setTimeout(()=>{if(cb[id]){delete cb[id];reject(new Error("Timeout"))}},18000)})}
+function nativeFetch(url){
+  return new Promise((resolve,reject)=>{
+    const id="r"+(++seq);
+    const timer=setTimeout(()=>{
+      delete cb[id];
+      reject(new Error("Request timeout"));
+    },15000);
+
+    cb[id]={
+      resolve:(v)=>{clearTimeout(timer);resolve(v)},
+      reject:(e)=>{clearTimeout(timer);reject(e)}
+    };
+
+    try{
+      Android.fetch(url,id);
+    }catch(e){
+      clearTimeout(timer);
+      delete cb[id];
+      reject(e);
+    }
+  });
+}
 function fmt(d){if(!d)return"";let x=new Date(d);return isNaN(x)?d:x.toLocaleDateString("en-IN",{day:"2-digit",month:"short"})}
 function ago(ts){if(!ts)return"Not updated";let m=Math.max(0,Math.round((Date.now()-ts)/60000));return m<1?"Updated just now":m<60?`Updated ${m}m ago`:`Updated ${Math.round(m/60)}h ago`}
 function openUrl(u){if(u)Android.openExternal(u)}
