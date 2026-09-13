@@ -10,8 +10,11 @@ android {
         applicationId 'com.arcanum'
         minSdk 26
         targetSdk 35
-        versionCode 2
-        versionName '1.2.0'
+        versionCode 3
+        versionName '1.3.0'
     }
 }
 
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+}
