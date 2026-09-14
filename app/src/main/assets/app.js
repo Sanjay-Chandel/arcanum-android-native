@@ -109,6 +109,8 @@ function yahooUrl(symbol) {
 }
 
 async function yahooQuote(symbol) {
+  let lastError = "";
+
   for (const s of [symbol + ".NS", symbol + ".BO"]) {
     try {
       const raw = JSON.parse(await nativeFetch(yahooUrl(s)));
@@ -127,12 +129,14 @@ async function yahooQuote(symbol) {
           currency: m.currency || "INR"
         };
       }
+
+      lastError = "No price in response";
     } catch (e) {
-      /* Try next exchange */
+      lastError = e?.message || String(e);
     }
   }
 
-  return { ok: false, symbol };
+  return { ok: false, symbol, error: lastError };
 }
 
 /* NSE dates */
@@ -291,6 +295,7 @@ async function loadFeed() {
   const urls = nseUrls();
 
   const keys = Object.keys(urls);
+  const nseErrors = [];
 
   /* NSE requests run independently */
   await Promise.allSettled(
@@ -302,7 +307,9 @@ async function loadFeed() {
 
         state.data[key] = normNse(key, raw);
       } catch (e) {
-        console.log("NSE " + key + " failed:", e);
+        const msg = e?.message || String(e);
+        console.log("NSE " + key + " failed:", msg);
+        nseErrors.push(key + ": " + msg);
         state.data[key] = [];
       }
     })
@@ -351,8 +358,9 @@ async function loadFeed() {
 
   render();
 
-  $("status").textContent =
-    "Live data • NSE + Google News + Yahoo Finance";
+  $("status").textContent = nseErrors.length
+    ? "News OK, NSE failed → " + nseErrors.join(" · ")
+    : "Live data • NSE + Google News + Yahoo Finance";
 }
 
 /* Market cards */
@@ -361,6 +369,7 @@ function marketCard(q) {
     return `<div class="market">
       <b>${esc(q?.symbol || "")}</b>
       <span>Unavailable</span>
+      <em class="err">${esc((q?.error || "").slice(0, 60))}</em>
     </div>`;
   }
 
