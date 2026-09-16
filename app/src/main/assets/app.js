@@ -2,6 +2,7 @@ const state = {
   tab: "results",
   q: "",
   watch: JSON.parse(localStorage.getItem("arcanum_watch") || "[]"),
+  open: new Set(),
   data: {
     results: [],
     actions: [],
@@ -104,11 +105,36 @@ function ago(ts) {
 }
 
 /* Yahoo Finance */
+const quoteCache = new Map();
+const QUOTE_TTL = 60 * 1000;
+
 function yahooUrl(symbol) {
   return `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
 }
 
 async function yahooQuote(symbol) {
+  const hit = quoteCache.get(symbol);
+
+  if (hit && (Date.now() - hit.at) < QUOTE_TTL) {
+    return hit.value;
+  }
+
+  if (hit && hit.pending) {
+    return hit.pending;
+  }
+
+  const job = fetchQuote(symbol);
+
+  quoteCache.set(symbol, { pending: job, at: 0 });
+
+  const value = await job;
+
+  quoteCache.set(symbol, { value, at: Date.now() });
+
+  return value;
+}
+
+async function fetchQuote(symbol) {
   let lastError = "";
 
   /* Index symbols start with ^ and must be used exactly as-is.
@@ -123,15 +149,41 @@ async function yahooQuote(symbol) {
       const m = raw?.chart?.result?.[0]?.meta;
 
       if (m && m.regularMarketPrice != null) {
+        const price = Number(m.regularMarketPrice);
+
+        /* previousClose is the ACTUAL prior session close.
+           chartPreviousClose is the close before the whole 5-day
+           window, which made the change (and its colour) wrong.
+           Fall back to the chart's own closes if neither is given. */
+        let prev = null;
+
+        if (m.previousClose != null) {
+          prev = Number(m.previousClose);
+        } else if (m.chartPreviousClose != null) {
+          prev = Number(m.chartPreviousClose);
+        } else {
+          const closes = (
+            raw?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || []
+          ).filter(v => typeof v === "number");
+
+          if (closes.length >= 2) {
+            prev = Number(closes[closes.length - 2]);
+          }
+        }
+
+        if (prev == null || !isFinite(prev) || prev === 0) {
+          prev = price;
+        }
+
+        const change = price - prev;
+
         return {
           ok: true,
           symbol,
-          price: Number(m.regularMarketPrice),
-          previous: Number(m.chartPreviousClose || m.previousClose || 0),
-          change: Number(
-            m.regularMarketPrice -
-            (m.chartPreviousClose || m.previousClose || m.regularMarketPrice)
-          ),
+          price,
+          previous: prev,
+          change,
+          percent: prev ? (change / prev) * 100 : 0,
           currency: m.currency || "INR"
         };
       }
@@ -202,6 +254,13 @@ function normNse(key, raw) {
           x.description ||
           x.subject ||
           "",
+        link:
+          x.xbrl ||
+          x.naviLink ||
+          (sym
+            ? "https://www.nseindia.com/get-quotes/equity?symbol=" +
+              encodeURIComponent(sym)
+            : ""),
         date:
           x.re_broadcast_date ||
           x.date ||
@@ -210,6 +269,14 @@ function normNse(key, raw) {
     }
 
     if (key === "actions") {
+      const bits = [];
+
+      if (x.purpose) bits.push("Purpose: " + x.purpose);
+      if (x.exDate || x.ex_date) bits.push("Ex-date: " + (x.exDate || x.ex_date));
+      if (x.recDate || x.recordDate) bits.push("Record date: " + (x.recDate || x.recordDate));
+      if (x.faceVal) bits.push("Face value: " + x.faceVal);
+      if (x.series) bits.push("Series: " + x.series);
+
       return {
         id: "a" + i,
         symbol: sym,
@@ -219,11 +286,11 @@ function normNse(key, raw) {
           x.purpose ||
           x.ex_date ||
           "Corporate action",
-        detail:
-          x.faceVal ||
-          x.purpose ||
-          x.subject ||
-          "",
+        detail: bits.join(" \u00b7 "),
+        link: sym
+          ? "https://www.nseindia.com/get-quotes/equity?symbol=" +
+            encodeURIComponent(sym)
+          : "",
         date:
           x.exDate ||
           x.recordDate ||
@@ -233,6 +300,8 @@ function normNse(key, raw) {
       };
     }
 
+    /* Filings: the attachment is a real PDF link, so use it as the
+       link rather than dumping the raw URL into the body text. */
     return {
       id: "f" + i,
       symbol: sym,
@@ -243,10 +312,17 @@ function normNse(key, raw) {
         x.description ||
         "Corporate announcement",
       detail:
-        x.attchmntFile ||
+        x.attchmntText ||
         x.description ||
+        x.desc ||
         x.subject ||
         "",
+      link:
+        x.attchmntFile ||
+        (sym
+          ? "https://www.nseindia.com/get-quotes/equity?symbol=" +
+            encodeURIComponent(sym)
+          : ""),
       date:
         x.an_dt ||
         x.broadcastDate ||
@@ -284,7 +360,7 @@ function rssItems(xml, source, type) {
         symbol: "",
         company: source,
         headline: title,
-        detail: desc.replace(/<[^>]*>/g, "").slice(0, 180),
+        detail: desc.replace(/<[^>]*>/g, "").trim(),
         date,
         link,
         type
@@ -397,11 +473,13 @@ function marketCard(q) {
     q.change < 0 ? "▼" :
     "•";
 
+  const pct = (q.percent ?? 0).toFixed(2);
+
   return `
     <div class="market ${cls}">
       <b>${esc(q.symbol)}</b>
-      <strong>₹${q.price.toFixed(2)}</strong>
-      <span>${arrow} ${q.change.toFixed(2)}</span>
+      <strong>${q.price.toFixed(2)}</strong>
+      <span>${arrow} ${Math.abs(q.change).toFixed(2)} (${pct}%)</span>
     </div>`;
 }
 
@@ -438,41 +516,60 @@ async function loadMarket() {
   el.innerHTML = qs.map(marketCard).join("");
 }
 
-async function enrichPrices(items) {
-  const syms = [
-    ...new Set(
-      items
-        .map(x => x.symbol)
-        .filter(Boolean)
-    )
-  ].slice(0, 20);
+function paintPrice(node, q) {
+  if (!q?.ok) return;
 
-  const qs = await Promise.all(
-    syms.map(s => yahooQuote(s))
-  );
+  const cls =
+    q.change > 0 ? "up" :
+    q.change < 0 ? "down" :
+    "flat";
 
-  const map = Object.fromEntries(
-    qs.map(q => [q.symbol, q])
-  );
+  node.textContent =
+    `${q.price.toFixed(2)} ${q.change >= 0 ? "+" : ""}${q.change.toFixed(2)}`;
 
-  document
-    .querySelectorAll("[data-symbol]")
-    .forEach(n => {
-      const q = map[n.dataset.symbol];
-
-      if (!q?.ok) return;
-
-      const cls =
-        q.change > 0 ? "up" :
-        q.change < 0 ? "down" :
-        "flat";
-
-      n.textContent =
-        `₹${q.price.toFixed(2)} ${q.change >= 0 ? "+" : ""}${q.change.toFixed(2)}`;
-
-      n.className = "price " + cls;
-    });
+  node.className = "price " + cls;
 }
+
+async function enrichPrices(items) {
+  const nodes = [...document.querySelectorAll("[data-symbol]")]
+    .filter(n => n.dataset.symbol);
+
+  /* Anything already cached is painted immediately, with no
+     network call at all. This is what makes searching feel fast. */
+  const need = [];
+
+  nodes.forEach(n => {
+    const s = n.dataset.symbol;
+    const hit = quoteCache.get(s);
+
+    if (hit && hit.value && (Date.now() - hit.at) < QUOTE_TTL) {
+      paintPrice(n, hit.value);
+    } else if (!need.includes(s)) {
+      need.push(s);
+    }
+  });
+
+  /* Only fetch what we do not already have, and cap it so a long
+     list never fires off dozens of requests at once. */
+  const batch = need.slice(0, 12);
+
+  const token = ++enrichPrices.run;
+
+  await Promise.all(
+    batch.map(async s => {
+      const q = await yahooQuote(s);
+
+      /* A newer render started while this was in flight - drop it. */
+      if (token !== enrichPrices.run) return;
+
+      document
+        .querySelectorAll(`[data-symbol="${CSS.escape(s)}"]`)
+        .forEach(n => paintPrice(n, q));
+    })
+  );
+}
+
+enrichPrices.run = 0;
 
 function filtered() {
   const arr = state.data[state.tab] || [];
@@ -532,9 +629,16 @@ function render() {
       ? ""
       : "No matching items. Try another search or refresh.";
 
-  $("list").innerHTML = items.map(x => `
-    <article class="card"
-      data-open="${esc(x.link || "")}">
+  $("list").innerHTML = items.map(x => {
+    const starred =
+      x.symbol && state.watch.includes(x.symbol);
+
+    const hasDetail = !!(x.detail || "").trim();
+    const hasLink = !!(x.link || "");
+
+    return `
+    <article class="card${state.open.has(x.id) ? " open" : ""}"
+      data-card="${esc(x.id)}">
 
       <div class="cardtop">
         <b class="symbol">${esc(x.symbol || x.company || "-")}</b>
@@ -543,6 +647,12 @@ function render() {
           class="price"
           data-symbol="${esc(x.symbol || "")}">
         </span>
+
+        <button
+          class="star${starred ? " on" : ""}"
+          data-star="${esc(x.symbol || "")}">
+          ${starred ? "\u2605" : "\u2606"}
+        </button>
       </div>
 
       <div class="company">
@@ -553,49 +663,70 @@ function render() {
         ${esc(x.headline || "")}
       </div>
 
-      <div class="detail">
-        ${esc(x.detail || "")}
-      </div>
+      ${hasDetail
+        ? `<div class="detail">${esc(x.detail)}</div>`
+        : ""}
 
       <div class="meta">
-        ${esc(fmt(x.date))}
+        <span>${esc(fmt(x.date))}</span>
+
+        ${hasDetail
+          ? `<button class="act" data-toggle="${esc(x.id)}">${
+              state.open.has(x.id) ? "LESS" : "MORE"
+            }</button>`
+          : ""}
+
+        ${hasLink
+          ? `<button class="act open-link"
+               data-link="${esc(x.link)}">OPEN \u2197</button>`
+          : ""}
       </div>
-
-      <button
-        class="star"
-        data-star="${esc(x.symbol || "")}">
-        ☆
-      </button>
-    </article>
-  `).join("");
-
-  document
-    .querySelectorAll("[data-open]")
-    .forEach(c => {
-      c.addEventListener("click", e => {
-        if (e.target.closest("[data-star]")) return;
-
-        const u = c.dataset.open;
-
-        if (u && window.Android?.openExternal) {
-          Android.openExternal(u);
-        }
-      });
-    });
-
-  document
-    .querySelectorAll("[data-star]")
-    .forEach(b => {
-      b.addEventListener("click", e => {
-        e.stopPropagation();
-        toggleWatch(b.dataset.star);
-      });
-    });
+    </article>`;
+  }).join("");
 
   enrichPrices(items);
 
   $("updated").textContent = ago(state.ts);
 }
+
+/* One listener for the whole list, attached once. Re-attaching a
+   listener per card on every render was part of the slowness. */
+$("list").addEventListener("click", e => {
+  const star = e.target.closest("[data-star]");
+  if (star) {
+    e.stopPropagation();
+    toggleWatch(star.dataset.star);
+    return;
+  }
+
+  const link = e.target.closest("[data-link]");
+  if (link) {
+    e.stopPropagation();
+    const u = link.dataset.link;
+    if (u && window.Android?.openExternal) {
+      Android.openExternal(u);
+    }
+    return;
+  }
+
+  const card = e.target.closest("[data-card]");
+  if (!card) return;
+
+  const id = card.dataset.card;
+
+  if (state.open.has(id)) {
+    state.open.delete(id);
+  } else {
+    state.open.add(id);
+  }
+
+  card.classList.toggle("open");
+
+  const btn = card.querySelector("[data-toggle]");
+  if (btn) {
+    btn.textContent = state.open.has(id) ? "LESS" : "MORE";
+  }
+});
 
 function toggleWatch(s) {
   if (!s) return;
@@ -680,9 +811,14 @@ $("tabs").addEventListener("click", e => {
   render();
 });
 
+let searchTimer = null;
+
 $("search").addEventListener("input", e => {
   state.q = e.target.value;
-  render();
+
+  /* Wait until typing pauses before re-rendering the whole list. */
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(render, 220);
 });
 
 $("clear").onclick = () => {
@@ -732,7 +868,7 @@ try {
   const vs = document.querySelectorAll("footer span");
   if (vs.length > 1) {
     vs[vs.length - 1].textContent =
-      "NSE + Google News + Yahoo Finance \u00b7 v1.5.0";
+      "NSE + Google News + Yahoo Finance \u00b7 v1.6.0";
   }
 } catch (e) {}
 
