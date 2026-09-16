@@ -111,7 +111,13 @@ function yahooUrl(symbol) {
 async function yahooQuote(symbol) {
   let lastError = "";
 
-  for (const s of [symbol + ".NS", symbol + ".BO"]) {
+  /* Index symbols start with ^ and must be used exactly as-is.
+     Only company tickers get an exchange suffix. */
+  const candidates = symbol.startsWith("^")
+    ? [symbol]
+    : [symbol + ".NS", symbol + ".BO"];
+
+  for (const s of candidates) {
     try {
       const raw = JSON.parse(await nativeFetch(yahooUrl(s)));
       const m = raw?.chart?.result?.[0]?.meta;
@@ -143,10 +149,11 @@ async function yahooQuote(symbol) {
 function nseDate(days) {
   const d = new Date(Date.now() - days * 86400000);
 
+  /* NSE expects DD-MM-YYYY, not YYYY-MM-DD */
   return [
-    d.getFullYear(),
+    String(d.getDate()).padStart(2, "0"),
     String(d.getMonth() + 1).padStart(2, "0"),
-    String(d.getDate()).padStart(2, "0")
+    d.getFullYear()
   ].join("-");
 }
 
@@ -306,6 +313,13 @@ async function loadFeed() {
         );
 
         state.data[key] = normNse(key, raw);
+
+        if (!state.data[key].length) {
+          const shape = Array.isArray(raw)
+            ? "array of " + raw.length
+            : "keys: " + Object.keys(raw || {}).join(",").slice(0, 60);
+          nseErrors.push(key + ": empty (" + shape + ")");
+        }
       } catch (e) {
         const msg = e?.message || String(e);
         console.log("NSE " + key + " failed:", msg);
@@ -359,7 +373,7 @@ async function loadFeed() {
   render();
 
   $("status").textContent = nseErrors.length
-    ? "News OK, NSE failed → " + nseErrors.join(" · ")
+    ? "NSE → " + nseErrors.join(" · ")
     : "Live data • NSE + Google News + Yahoo Finance";
 }
 
@@ -714,6 +728,14 @@ $("watchInput").addEventListener(
 );
 
 /* Start application */
+try {
+  const vs = document.querySelectorAll("footer span");
+  if (vs.length > 1) {
+    vs[vs.length - 1].textContent =
+      "NSE + Google News + Yahoo Finance \u00b7 v1.5.0";
+  }
+} catch (e) {}
+
 state.ts = Date.now();
 
 render();
