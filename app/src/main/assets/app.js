@@ -3,6 +3,7 @@ const state = {
   q: "",
   watch: JSON.parse(localStorage.getItem("arcanum_watch") || "[]"),
   open: new Set(),
+  shown: 60,
   data: {
     results: [],
     actions: [],
@@ -77,10 +78,35 @@ function nativeFetch(url) {
   });
 }
 
+const NSE_MONTHS = {
+  Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+  Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11
+};
+
+/* NSE dates look like "16-Jan-2025 20:20:21" or "16-Jan-2025",
+   which the WebView's Date parser handles inconsistently. */
+function parseNseDate(s) {
+  if (!s) return null;
+
+  const m = String(s).match(
+    /^(\d{1,2})-([A-Za-z]{3})-(\d{4})(?:\s+(\d{1,2}):(\d{2}):(\d{2}))?/
+  );
+
+  if (!m) return null;
+
+  const mon = NSE_MONTHS[m[2]];
+  if (mon == null) return null;
+
+  return new Date(
+    +m[3], mon, +m[1],
+    +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)
+  );
+}
+
 function fmt(d) {
   if (!d) return "";
 
-  const x = new Date(d);
+  const x = parseNseDate(d) || new Date(d);
 
   if (isNaN(x)) return String(d);
 
@@ -211,15 +237,18 @@ function nseDate(days) {
 
 /* NSE API URLs */
 function nseUrls() {
+  /* 30 days across the whole market was 15,000+ filings - that is
+     what made loading and switching tabs feel slow. A week of
+     filings/actions is still plenty and loads far faster. */
   return {
     results:
       `https://www.nseindia.com/api/corporates-financial-results?index=equities&period=Quarterly&from_date=${nseDate(45)}&to_date=${nseDate(0)}`,
 
     actions:
-      `https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=${nseDate(30)}&to_date=${nseDate(0)}`,
+      `https://www.nseindia.com/api/corporates-corporateActions?index=equities&from_date=${nseDate(14)}&to_date=${nseDate(0)}`,
 
     filings:
-      `https://www.nseindia.com/api/corporate-announcements?index=equities&from_date=${nseDate(30)}&to_date=${nseDate(0)}`
+      `https://www.nseindia.com/api/corporate-announcements?index=equities&from_date=${nseDate(7)}&to_date=${nseDate(0)}`
   };
 }
 
@@ -229,107 +258,99 @@ function normNse(key, raw) {
     : (raw?.data || []);
 
   return list.map((x, i) => {
-    const sym =
-      x.symbol ||
-      x.sml ||
-      x.symbolName ||
-      "";
-
-    const company =
-      x.sm_name ||
-      x.companyName ||
-      x.company ||
-      sym;
 
     if (key === "results") {
+      const sym = x.symbol || "";
+      const company = x.companyName || sym;
+
+      const scope =
+        x.consolidated === "Consolidated"
+          ? "Consolidated"
+          : "Standalone";
+
+      const headline = [x.relatingTo, scope]
+        .filter(Boolean)
+        .join(" \u00b7 ") || "Quarterly results";
+
+      const detailBits = [];
+      if (x.audited) detailBits.push(x.audited);
+      if (x.fromDate && x.toDate) {
+        detailBits.push("Period: " + x.fromDate + " to " + x.toDate);
+      }
+      if (x.financialYear) detailBits.push("FY: " + x.financialYear);
+
       return {
         id: "r" + i,
         symbol: sym,
         company,
-        headline:
-          "Quarterly results - " +
-          (x.re_broadcast_date || x.re_broadcast_date_new || ""),
-        detail:
-          x.details ||
-          x.description ||
-          x.subject ||
-          "",
-        link:
-          x.xbrl ||
-          x.naviLink ||
-          (sym
-            ? "https://www.nseindia.com/get-quotes/equity?symbol=" +
-              encodeURIComponent(sym)
-            : ""),
-        date:
-          x.re_broadcast_date ||
-          x.date ||
-          ""
+        headline,
+        detail: detailBits.join(" \u00b7 "),
+        /* The XBRL link is a raw machine-readable data file, not
+           something a person can read - send them to the quote
+           page instead. */
+        link: sym
+          ? "https://www.nseindia.com/get-quotes/equity?symbol=" +
+            encodeURIComponent(sym)
+          : "",
+        date: x.broadCastDate || x.filingDate || ""
       };
     }
 
     if (key === "actions") {
-      const bits = [];
+      const sym = x.symbol || "";
+      const company = x.comp || sym;
 
-      if (x.purpose) bits.push("Purpose: " + x.purpose);
-      if (x.exDate || x.ex_date) bits.push("Ex-date: " + (x.exDate || x.ex_date));
-      if (x.recDate || x.recordDate) bits.push("Record date: " + (x.recDate || x.recordDate));
-      if (x.faceVal) bits.push("Face value: " + x.faceVal);
-      if (x.series) bits.push("Series: " + x.series);
+      const bits = [];
+      if (x.exDate && x.exDate !== "-") bits.push("Ex-date: " + x.exDate);
+      if (x.recDate && x.recDate !== "-") bits.push("Record date: " + x.recDate);
+      if (x.faceVal) bits.push("Face value: \u20b9" + x.faceVal);
 
       return {
         id: "a" + i,
         symbol: sym,
         company,
-        headline:
-          x.subject ||
-          x.purpose ||
-          x.ex_date ||
-          "Corporate action",
+        headline: x.subject || "Corporate action",
         detail: bits.join(" \u00b7 "),
         link: sym
           ? "https://www.nseindia.com/get-quotes/equity?symbol=" +
             encodeURIComponent(sym)
           : "",
-        date:
-          x.exDate ||
-          x.recordDate ||
-          x.ex_date ||
-          x.date ||
-          ""
+        date: x.exDate && x.exDate !== "-" ? x.exDate : (x.caBroadcastDate || "")
       };
     }
 
-    /* Filings: the attachment is a real PDF link, so use it as the
-       link rather than dumping the raw URL into the body text. */
+    /* filings / announcements */
+    const sym = x.symbol || "";
+    const company = x.sm_name || sym;
+
     return {
       id: "f" + i,
       symbol: sym,
       company,
-      headline:
-        x.subject ||
-        x.desc ||
-        x.description ||
-        "Corporate announcement",
-      detail:
-        x.attchmntText ||
-        x.description ||
-        x.desc ||
-        x.subject ||
-        "",
+      headline: x.desc || "Corporate announcement",
+      detail: x.attchmntText || "",
       link:
         x.attchmntFile ||
         (sym
           ? "https://www.nseindia.com/get-quotes/equity?symbol=" +
             encodeURIComponent(sym)
           : ""),
-      date:
-        x.an_dt ||
-        x.broadcastDate ||
-        x.date ||
-        ""
+      date: x.an_dt || ""
     };
-  }).filter(x => x.headline);
+  })
+    .filter(x => x.headline)
+    .filter((() => {
+      /* Keep the first occurrence of each symbol+date+headline
+         combination, drop exact repeats. Set-based so it stays
+         fast even with thousands of rows. */
+      const seen = new Set();
+      return x => {
+        const key = x.symbol + "|" + x.date + "|" + x.headline;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      };
+    })());
 }
 
 /* Google News RSS */
@@ -629,7 +650,12 @@ function render() {
       ? ""
       : "No matching items. Try another search or refresh.";
 
-  $("list").innerHTML = items.map(x => {
+  /* Rendering thousands of cards in one go is what made the app feel
+     slow - only build the DOM for a page at a time. */
+  const visible = items.slice(0, state.shown);
+  const remaining = items.length - visible.length;
+
+  $("list").innerHTML = visible.map(x => {
     const starred =
       x.symbol && state.watch.includes(x.symbol);
 
@@ -682,9 +708,15 @@ function render() {
           : ""}
       </div>
     </article>`;
-  }).join("");
+  }).join("") + (
+    remaining > 0
+      ? `<button id="loadMore" class="loadmore">
+           Show ${Math.min(remaining, 60)} more (${remaining} left)
+         </button>`
+      : ""
+  );
 
-  enrichPrices(items);
+  enrichPrices(visible);
 
   $("updated").textContent = ago(state.ts);
 }
@@ -692,6 +724,12 @@ function render() {
 /* One listener for the whole list, attached once. Re-attaching a
    listener per card on every render was part of the slowness. */
 $("list").addEventListener("click", e => {
+  if (e.target.closest("#loadMore")) {
+    state.shown += 60;
+    render();
+    return;
+  }
+
   const star = e.target.closest("[data-star]");
   if (star) {
     e.stopPropagation();
@@ -807,6 +845,7 @@ $("tabs").addEventListener("click", e => {
   if (!b) return;
 
   state.tab = b.dataset.tab;
+  state.shown = 60;
 
   render();
 });
@@ -815,6 +854,7 @@ let searchTimer = null;
 
 $("search").addEventListener("input", e => {
   state.q = e.target.value;
+  state.shown = 60;
 
   /* Wait until typing pauses before re-rendering the whole list. */
   clearTimeout(searchTimer);
@@ -868,7 +908,7 @@ try {
   const vs = document.querySelectorAll("footer span");
   if (vs.length > 1) {
     vs[vs.length - 1].textContent =
-      "NSE + Google News + Yahoo Finance \u00b7 v1.6.0";
+      "NSE + Google News + Yahoo Finance \u00b7 v1.7.0";
   }
 } catch (e) {}
 
