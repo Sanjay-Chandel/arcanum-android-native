@@ -8,7 +8,8 @@ const state = {
     results: [],
     actions: [],
     filings: [],
-    news: []
+    news: [],
+    firms: []
   },
   ts: 0
 };
@@ -101,6 +102,20 @@ function parseNseDate(s) {
     +m[3], mon, +m[1],
     +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)
   );
+}
+
+function itemTime(x) {
+  const d = parseNseDate(x?.date) || new Date(x?.date || 0);
+  const t = d.getTime ? d.getTime() : 0;
+  return isNaN(t) ? 0 : t;
+}
+
+const MAX_PER_BUCKET = 150;
+
+function capRecent(items) {
+  return [...items]
+    .sort((a, b) => itemTime(b) - itemTime(a))
+    .slice(0, MAX_PER_BUCKET);
 }
 
 function fmt(d) {
@@ -358,6 +373,58 @@ function gnews(q) {
   return `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-IN&gl=IN&ceid=IN:en`;
 }
 
+/* /rss/search ranks by RELEVANCE, not recency - a keyword match from three
+   days ago can outrank something from an hour ago. /rss/headlines/section
+   is a true chronological feed, most-recent-first, which is what a "latest
+   news" tab actually needs. */
+function gnewsTopic(topic) {
+  return `https://news.google.com/rss/headlines/section/topic/${topic}?hl=en-IN&gl=IN&ceid=IN:en`;
+}
+
+/* Supplementary market-news sources. If NSE itself is slow, blocked, or a
+   company simply hasn't been picked up by NSE's feed yet, these often have
+   it already - keeps results/actions from silently going empty. */
+const GENERIC_FEEDS = [
+  { url: "https://www.moneycontrol.com/rss/latestnews.xml", source: "Moneycontrol" },
+  { url: "https://www.livemint.com/rss/markets", source: "LiveMint" },
+  { url: "https://www.business-standard.com/rss/markets-106.rss", source: "Business Standard" },
+  { url: "https://feeds.hindustantimes.com/HT-Business?format=xml", source: "Hindustan Times" }
+];
+
+function classifyHeadline(titleRaw) {
+  const t = (titleRaw || "").toLowerCase();
+
+  const actionWords = [
+    "dividend", "bonus issue", "bonus shares", "stock split", "share split",
+    "buyback", "record date", "ex-date", "rights issue", "board meeting"
+  ];
+  const resultWords = [
+    "q1 results", "q2 results", "q3 results", "q4 results", "quarterly results",
+    "net profit", "net loss", "posts profit", "posts loss",
+    "revenue rises", "revenue falls", "results:", "results preview",
+    "results review", "beats estimates", "misses estimates"
+  ];
+
+  if (actionWords.some(w => t.includes(w))) return "actions";
+  if (resultWords.some(w => t.includes(w))) return "results";
+  return "news";
+}
+
+/* Brokerage/analyst call tracking - the "Firms" tab. Scans the same
+   market-news feeds for mentions of these firms' names. */
+const WATCHED_FIRMS = [
+  "Nomura", "Goldman Sachs", "Morgan Stanley", "JP Morgan", "JPMorgan",
+  "HSBC", "UBS", "Credit Suisse", "Macquarie", "ICICI Securities",
+  "Motilal Oswal", "Sharekhan", "Ventura Securities", "Prabhudas Lilladher",
+  "Jefferies", "CLSA", "Kotak Institutional", "Citi", "Bernstein",
+  "Emkay Global"
+];
+
+function matchFirms(text) {
+  const lower = (text || "").toLowerCase();
+  return WATCHED_FIRMS.filter(f => lower.includes(f.toLowerCase()));
+}
+
 function rssItems(xml, source, type) {
   const doc = new DOMParser().parseFromString(xml, "text/xml");
   const out = [];
@@ -392,26 +459,29 @@ function rssItems(xml, source, type) {
   return out;
 }
 
-/* Main feed loader */
+/* Main feed loader.
+
+   Buckets are now MERGED from two independent sources rather than NSE
+   alone: if NSE is slow, rate-limited, or just hasn't picked something
+   up yet, the news-based feeds usually already have it, so results and
+   actions rarely go empty. Everything is de-duplicated and sorted by
+   actual date before display (capRecent) - previously nothing was
+   sorted at all, which was the real cause of "not showing the latest". */
 async function loadFeed() {
   $("status").textContent = "Loading live web data...";
 
   const urls = nseUrls();
-
   const keys = Object.keys(urls);
   const nseErrors = [];
+  const nse = { results: [], actions: [], filings: [] };
 
-  /* NSE requests run independently */
   await Promise.allSettled(
     keys.map(async key => {
       try {
-        const raw = JSON.parse(
-          await nativeFetch(urls[key])
-        );
+        const raw = JSON.parse(await nativeFetch(urls[key]));
+        nse[key] = normNse(key, raw);
 
-        state.data[key] = normNse(key, raw);
-
-        if (!state.data[key].length) {
+        if (!nse[key].length) {
           const shape = Array.isArray(raw)
             ? "array of " + raw.length
             : "keys: " + Object.keys(raw || {}).join(",").slice(0, 60);
@@ -421,56 +491,85 @@ async function loadFeed() {
         const msg = e?.message || String(e);
         console.log("NSE " + key + " failed:", msg);
         nseErrors.push(key + ": " + msg);
-        state.data[key] = [];
       }
     })
   );
 
-  /* Google News should never block the application */
-  const feeds = [
-    [
-      "news",
-      gnews("Indian stocks NSE BSE market companies when:1d")
-    ],
-    [
-      "news",
-      gnews("Indian stock corporate announcement firms when:1d")
-    ],
-    [
-      "news",
-      gnews("Indian quarterly results stocks when:3d")
-    ]
+  /* Topic-targeted feeds land directly in their bucket. The BUSINESS
+     topic feed is chronological (unlike a keyword search), which is
+     what keeps the News tab actually current. */
+  const targeted = [
+    ["results", gnews("NSE India Q results net profit when:2d")],
+    ["results", gnews("quarterly results BSE NSE India when:2d")],
+    ["actions", gnews("NSE India dividend bonus buyback record date when:3d")],
+    ["actions", gnews("stock split rights issue NSE India when:3d")],
+    ["news", gnewsTopic("BUSINESS")]
   ];
 
-  let news = [];
+  const fromNews = { results: [], actions: [], news: [] };
 
   await Promise.allSettled(
-    feeds.map(async ([type, url]) => {
+    targeted.map(async ([bucket, url]) => {
       try {
         const xml = await nativeFetch(url);
-        news.push(...rssItems(xml, "Google News", type));
+        fromNews[bucket].push(...rssItems(xml, "Google News", bucket));
       } catch (e) {
-        console.log("News failed:", e);
+        console.log("News (" + bucket + ") failed:", e);
       }
     })
   );
 
-  const seen = new Set();
+  /* Generic market feeds: classified by keyword into the right bucket,
+     and separately scanned for brokerage/analyst firm mentions. */
+  const generic = [];
 
-  state.data.news = news
-    .filter(x => {
-      if (seen.has(x.id)) return false;
-      seen.add(x.id);
-      return true;
+  await Promise.allSettled(
+    GENERIC_FEEDS.map(async feed => {
+      try {
+        const xml = await nativeFetch(feed.url);
+        generic.push(...rssItems(xml, feed.source, "news"));
+      } catch (e) {
+        console.log("Feed (" + feed.source + ") failed:", e);
+      }
     })
-    .slice(0, 150);
+  );
+
+  generic.forEach(it => {
+    const bucket = classifyHeadline(it.headline);
+    fromNews[bucket].push(it);
+  });
+
+  const firms = generic
+    .map(it => {
+      const hit = matchFirms(it.headline + " " + it.detail);
+      return hit.length
+        ? { ...it, id: "firm-" + it.id, detail: hit.join(", ") }
+        : null;
+    })
+    .filter(Boolean);
+
+  const dedupe = items => {
+    const seen = new Set();
+    return items.filter(x => {
+      const key = x.link || x.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  state.data.results = capRecent(dedupe([...nse.results, ...fromNews.results]));
+  state.data.actions = capRecent(dedupe([...nse.actions, ...fromNews.actions]));
+  state.data.filings = capRecent(nse.filings);
+  state.data.news = capRecent(dedupe(fromNews.news));
+  state.data.firms = capRecent(dedupe(firms));
 
   state.ts = Date.now();
 
   render();
 
   $("status").textContent = nseErrors.length
-    ? "NSE → " + nseErrors.join(" · ")
+    ? "NSE → " + nseErrors.join(" · ") + " (showing news-source results)"
     : "Live data • NSE + Google News + Yahoo Finance";
 }
 
@@ -609,7 +708,7 @@ function filtered() {
 }
 
 function render() {
-  ["results", "actions", "filings", "news"].forEach(k => {
+  ["results", "actions", "filings", "news", "firms"].forEach(k => {
     const el = $("n-" + k);
     if (el) {
       el.textContent =
@@ -908,7 +1007,7 @@ try {
   const vs = document.querySelectorAll("footer span");
   if (vs.length > 1) {
     vs[vs.length - 1].textContent =
-      "NSE + Google News + Yahoo Finance \u00b7 v1.7.0";
+      "NSE + Google News + Yahoo Finance \u00b7 v1.8.0";
   }
 } catch (e) {}
 
