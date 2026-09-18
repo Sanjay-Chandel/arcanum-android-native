@@ -265,4 +265,38 @@ public class MainActivity extends Activity {
                                 String body = plainGet(withCrumb, yahooCookie, "https://finance.yahoo.com/");
                                 sendResult(id, body, true);
                             } catch (Exception secondTry) {
-                                yahooCrumb = nu
+                                yahooCrumb = null;
+                                sendResult(id, "Yahoo: " + secondTry.getMessage(), false);
+                            }
+                            return;
+                        }
+
+                        sendResult(id, firstTry.getMessage(), false);
+                    }
+
+                } catch (Exception e) {
+                    sendResult(id, e.getClass().getSimpleName() + ": " + e.getMessage(), false);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void openExternal(String url) {
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                startActivity(intent);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (webView != null) {
+            webView.destroy();
+            webView = null;
+        }
+        executor.shutdownNow();
+        super.onDestroy();
+    }
+}
