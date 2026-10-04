@@ -104,6 +104,69 @@ function parseNseDate(s) {
   );
 }
 
+/* Some sites auto-republish old corporate news with a fresh timestamp on
+   every crawl - the date looks "today" but the underlying news is stale.
+   Block by domain/title-suffix instead, since date filtering alone can't
+   catch these. */
+const AGGREGATOR_BLOCKLIST = [
+  "scanx.trade", "univest.in", "tipranks.com",
+  "simplywall.st", "marketbeat.com", "stockanalysis.com"
+];
+
+function isBlockedAggregator(url, title) {
+  const t = (title || "").toLowerCase();
+
+  if (AGGREGATOR_BLOCKLIST.some(d =>
+    t.endsWith("- " + d.split(".")[0]) || t.includes(d)
+  )) return true;
+
+  if (!url) return false;
+
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    return AGGREGATOR_BLOCKLIST.some(d => host === d || host.endsWith("." + d));
+  } catch (e) {
+    return false;
+  }
+}
+
+/* Strip tracking params and trailing slash so the same article linked
+   two different ways still dedupes as one item. */
+function normalizeUrl(url) {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    u.hash = "";
+    const kept = [...u.searchParams.entries()].filter(
+      ([k]) => !["utm_source", "utm_medium", "utm_campaign", "utm_content"].includes(k)
+    );
+    u.search = new URLSearchParams(kept).toString();
+    return u.toString().replace(/\/$/, "");
+  } catch (e) {
+    return url;
+  }
+}
+
+function hashCode(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h) + str.charCodeAt(i);
+    h |= 0;
+  }
+  return h;
+}
+
+/* Combines a normalized link with a hash of the headline, so the same
+   story from two feeds (even with slightly different query params on
+   the link) collapses to one dedup key. */
+function dedupKey(item) {
+  if (item.link) {
+    const titleHash = Math.abs(hashCode(item.headline || "")) % 1000000;
+    return normalizeUrl(item.link) + "_" + titleHash;
+  }
+  return item.id || (item.headline + "_" + item.company);
+}
+
 function itemTime(x) {
   const d = parseNseDate(x?.date) || new Date(x?.date || 0);
   const t = d.getTime ? d.getTime() : 0;
@@ -112,8 +175,25 @@ function itemTime(x) {
 
 const MAX_PER_BUCKET = 150;
 
-function capRecent(items) {
-  return [...items]
+/* However wide the fetch window was, don't actually show anything older
+   than this per tab - a stray old-dated item from a supplement feed
+   shouldn't sit at the bottom of "latest" results. */
+const DAYS_TO_KEEP = { results: 45, actions: 30, filings: 30, news: 2, firms: 7 };
+
+function withinWindow(x, bucket) {
+  const t = itemTime(x);
+  if (!t) return false;
+  const daysAgo = (Date.now() - t) / 86400000;
+  const maxDays = DAYS_TO_KEEP[bucket] ?? 30;
+  return daysAgo >= -1 && daysAgo <= maxDays;
+}
+
+function capRecent(items, bucket) {
+  const filtered = bucket
+    ? items.filter(x => withinWindow(x, bucket))
+    : items;
+
+  return [...filtered]
     .sort((a, b) => itemTime(b) - itemTime(a))
     .slice(0, MAX_PER_BUCKET);
 }
@@ -394,19 +474,22 @@ const GENERIC_FEEDS = [
 function classifyHeadline(titleRaw) {
   const t = (titleRaw || "").toLowerCase();
 
-  const actionWords = [
-    "dividend", "bonus issue", "bonus shares", "stock split", "share split",
-    "buyback", "record date", "ex-date", "rights issue", "board meeting"
-  ];
+  /* Deliberately strict - a loose match here is how generic market
+     chatter ends up misfiled into Results/Actions instead of News. */
   const resultWords = [
-    "q1 results", "q2 results", "q3 results", "q4 results", "quarterly results",
-    "net profit", "net loss", "posts profit", "posts loss",
-    "revenue rises", "revenue falls", "results:", "results preview",
-    "results review", "beats estimates", "misses estimates"
+    "q1 results", "q2 results", "q3 results", "q4 results",
+    "quarterly results", "earnings beat", "earnings miss",
+    "posts record", "reports profit of", "reports loss of"
+  ];
+  const actionWords = [
+    "dividend record date", "dividend ex-date",
+    "bonus issue record date", "bonus shares record date",
+    "stock split record date", "buyback record date",
+    "rights issue record date", "board meeting"
   ];
 
-  if (actionWords.some(w => t.includes(w))) return "actions";
   if (resultWords.some(w => t.includes(w))) return "results";
+  if (actionWords.some(w => t.includes(w))) return "actions";
   return "news";
 }
 
@@ -442,7 +525,7 @@ function rssItems(xml, source, type) {
     const date =
       it.querySelector("pubDate")?.textContent?.trim() || "";
 
-    if (title) {
+    if (title && !isBlockedAggregator(link, title)) {
       out.push({
         id: source + i,
         symbol: "",
@@ -548,21 +631,32 @@ async function loadFeed() {
     })
     .filter(Boolean);
 
+  /* Mark news-sourced items landing in Results/Actions as such, so it's
+     clear which is confirmed NSE data versus news coverage of it. */
+  const tagAsNews = items => items.map(it => ({
+    ...it,
+    detail: it.detail ? "News coverage · " + it.detail : "News coverage"
+  }));
+
   const dedupe = items => {
     const seen = new Set();
     return items.filter(x => {
-      const key = x.link || x.id;
+      const key = dedupKey(x);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
   };
 
-  state.data.results = capRecent(dedupe([...nse.results, ...fromNews.results]));
-  state.data.actions = capRecent(dedupe([...nse.actions, ...fromNews.actions]));
-  state.data.filings = capRecent(nse.filings);
-  state.data.news = capRecent(dedupe(fromNews.news));
-  state.data.firms = capRecent(dedupe(firms));
+  state.data.results = capRecent(
+    dedupe([...nse.results, ...tagAsNews(fromNews.results)]), "results"
+  );
+  state.data.actions = capRecent(
+    dedupe([...nse.actions, ...tagAsNews(fromNews.actions)]), "actions"
+  );
+  state.data.filings = capRecent(nse.filings, "filings");
+  state.data.news = capRecent(dedupe(fromNews.news), "news");
+  state.data.firms = capRecent(dedupe(firms), "firms");
 
   state.ts = Date.now();
 
@@ -1007,7 +1101,7 @@ try {
   const vs = document.querySelectorAll("footer span");
   if (vs.length > 1) {
     vs[vs.length - 1].textContent =
-      "NSE + Google News + Yahoo Finance \u00b7 v1.8.0";
+      "NSE + Google News + Yahoo Finance \u00b7 v1.9.0";
   }
 } catch (e) {}
 
