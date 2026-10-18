@@ -32,6 +32,32 @@
 <div id="empty" hidden>No matching items.</div>
 </main>
 <footer><span id="updated">Not updated</span><span>NSE + Google News + Yahoo Finance · v2.0.0</span></footer>
-<script src="app.js"></script>
+<script>
+/* If anything stops the app from starting, say so on screen instead of freezing on "Loading". */
+(function () {
+  function show(msg) {
+    var s = document.getElementById("status");
+    if (!s) return;
+    s.textContent = "\u26a0 " + msg;
+    s.style.color = "#c81e1e";
+    s.style.whiteSpace = "pre-wrap";
+  }
+  window.__arcanumShow = show;
+  window.onerror = function (m, src, line) { show("Script error: " + m + " (line " + line + ")"); };
+  window.addEventListener("unhandledrejection", function (e) {
+    show("Error: " + ((e.reason && e.reason.message) || e.reason));
+  });
+  /* app.js sets window.__arcanumReady as soon as it starts. If it never does, the file is
+     empty, cut off, or an old copy - say so instead of sitting on "Loading". */
+  setTimeout(function () {
+    if (window.__arcanumReady) return;
+    var s = document.getElementById("status");
+    if (s && s.textContent.indexOf("\u26a0") !== 0) {
+      show("The app script did not start - app.js is empty, cut off or an old copy. Re-upload app.js (it should be about 39 KB and end with: }, 5 * 60 * 1000);)");
+    }
+  }, 4000);
+})();
+</script>
+<script src="app.js" onerror="window.__arcanumShow('app.js could not be loaded')"></script>
 </body>
 </html>
